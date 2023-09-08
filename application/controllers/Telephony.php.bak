@@ -1,0 +1,433 @@
+<?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+class Telephony extends CI_Controller {
+    public function __construct() {
+        parent::__construct();      
+      
+        if (empty($this->session->user_id)) {
+            redirect('login');
+        }
+    }
+    
+    public function save_log(){
+        $log    =   $this->input->post('log');
+        $log_arr = explode('|', $log);
+        $insert_arr = array(
+                        'comp_id'=>$this->session->companey_id,
+                        'mobile_no'=>$log_arr[1],
+                        'agent_id'=>$this->session->telephony_agent_id,
+                        'session_id'=>$log_arr[2],
+                        'call_by'=>$this->session->user_id
+                    );
+        $this->db->insert('telephony_log',$insert_arr);
+    }
+
+    public function forword_to($phone=''){
+        if(!empty($_GET['phone'])){
+            $phone=$_GET['phone'];
+        }else{$phone=$phone;}
+        $this->db->select('enq.enquiry_id,enq.status');
+        $this->db->where(array('enq.phone' => $phone,"usr.companey_id" => $this->session->companey_id ) );
+        $this->db->from('enquiry enq');
+        $this->db->join('tbl_admin usr', 'usr.pk_i_admin_id = enq.created_by', 'left');
+        $row_array    =   $this->db->get()->row_array();        
+      
+        if(empty($row_array)){
+            $url = 'enquiry/create?phone='.$phone;            
+        }else{
+            if($row_array['status'] == 1){
+                $url= 'enquiry/view/'.$row_array['enquiry_id'];
+            }else if($row_array['status'] == 2){
+                $url= 'lead/lead_details/'.$row_array['enquiry_id'];             
+            }else if($row_array['status'] == 3){
+                $url= 'client/view/'.$row_array['enquiry_id'];
+            }
+        }
+        
+        
+        redirect($url,'refresh');
+        
+    }
+    
+    public function mark_abilibality(){
+        
+        $atID   =   !empty($_POST['callbreakstatus'])?$_POST['callbreakstatus']:'';
+        
+        $user_id    =   $this->session->user_id;        
+
+            $curl = curl_init();
+
+            curl_setopt_array($curl, array(
+              CURLOPT_URL => "https://developers.myoperator.co/user",
+              CURLOPT_RETURNTRANSFER => true,
+              CURLOPT_ENCODING => "",
+              CURLOPT_MAXREDIRS => 10,
+              CURLOPT_TIMEOUT => 30,
+              CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+              CURLOPT_CUSTOMREQUEST => "PUT",
+              CURLOPT_POSTFIELDS => "token=".$this->session->telephony_token."&receive_calls=".$atID."&uuid=".$this->session->telephony_agent_id,
+              CURLOPT_HTTPHEADER => array(
+                "cache-control: no-cache",
+                "content-type: application/x-www-form-urlencoded",
+                "postman-token: 3d348a84-e8b7-0c9c-c602-d7b6dd625bca"
+              ),
+            ));
+
+            $response = curl_exec($curl);
+            $err = curl_error($curl);
+
+            curl_close($curl);
+
+            if ($err) {
+              echo "cURL Error #:" . $err;
+            } else {
+              echo $response;
+            }
+            $user_id    =   $this->session->user_id;
+            $this->db->set('availability',$atID);
+            $this->db->where('pk_i_admin_id',$user_id);
+            $this->db->update('tbl_admin');         
+        
+            unset($this->session->availability);
+            $_SESSION['availability'] =  $atID;
+            redirect('enq/index'); 
+            // if($atID == 0){     
+        //     echo json_encode(array('id'=>0,'status'=>$atID));
+        // }else{
+        //     echo json_encode(array('id'=>0,'status'=>$atID));           
+        // }
+    }
+
+   public function get_call_status($uid=''){
+        $newdata = array( 
+        'uid_call'  =>str_replace('_','.',base64_decode($uid)), 
+        );
+        $where=' uid="'.str_replace('_','.',base64_decode($uid)).'" AND users!="" AND status=0 AND (cll_state=5 OR cll_state=3)';
+        $this->db->select('users');
+        $this->db->from('tbl_col_log');
+        $this->db->where($where);
+        $this->db->order_by('id','DESC');
+        $res=$this->db->get()->row();
+        if(!empty($res)){
+         $array_users= json_decode($res->users);
+         $user_id='91'.$this->session->phone;
+        if(in_array($user_id,$array_users)){
+        echo '1';
+        $this->session->set_userdata($newdata);   
+        $this->db->set('status',1);
+        $this->db->set('enq_id',$this->session->enq_id);
+        $this->db->where('uid',str_replace('_','.',base64_decode($uid)));
+        $this->db->update('tbl_col_log');
+        }else{echo '2';  
+        $this->session->unset_userdata($newdata);
+       }
+        }else{  
+        $this->session->unset_userdata($newdata);
+            echo '2';
+        }
+    }
+    
+    /*public function get_in_status($uid=''){
+        $newdata = array( 
+        'uid_call'  =>str_replace('_','.',base64_decode($uid)), 
+        );
+        $where=' uid="'.str_replace('_','.',base64_decode($uid)).'" AND users!="" AND status=0 AND (cll_state=5 OR cll_state=3)';
+        $this->db->select('users');
+        $this->db->from('tbl_col_log');
+        $this->db->where($where);
+        $this->db->order_by('id','DESC');
+        $res=$this->db->get()->row();
+        if(!empty($res)){
+         $array_users= json_decode($res->users);
+         $user_id='91'.$this->session->phone;
+        if(in_array($user_id,$array_users)){
+         echo '1';
+        $this->session->set_userdata($newdata);   
+        $this->db->set('status',1);
+        //$this->db->set('enq_id',$this->session->enq_id);
+        $this->db->where('uid',str_replace('_','.',base64_decode($uid)));
+        $this->db->update('tbl_col_log');
+        }else{echo '2';  
+        $this->session->unset_userdata($newdata);
+       }
+        }else{  
+        $this->session->unset_userdata($newdata);
+            echo '2';
+        }
+    }*/
+
+
+    public function get_in_status($uid=''){
+        $this->db->select('enq_id,phone_number');
+        $this->db->from('tbl_col_log');
+        $this->db->where('uid',base64_decode($uid));
+       // $this->db->where('users!=','');
+        $this->db->where('status','1');
+       // $this->db->where('cll_state','11');
+        $this->db->order_by('id','DESC');
+        $res=$this->db->get()->row();
+        if(!empty($res->enq_id)){
+         $this->db->set('status','0');
+         $this->db->where('uid',base64_decode($uid));
+         $this->db->update('tbl_col_log');
+
+        $this->db->select('enquiry_id,status,phone,name_prefix,name,lastname');
+        $this->db->from('enquiry');
+        $this->db->where('enquiry_id',$res->enq_id);
+        $enq=$this->db->get()->row();
+
+        if($enq->status==1){
+                $url = 'enquiry/view/'.$enq->enquiry_id;
+        }else if($enq->status==2){
+                $url = 'lead/lead_details/'.$enq->enquiry_id;
+        }else{
+                $url = 'client/view/'.$enq->enquiry_id;
+        }
+
+        echo '<table class="table table-bordered table-hover">
+                        <tr>
+                            <th>Name</th>
+                            <th>Mobile</th>
+                            <th>Action</th>
+                        </tr>';                  
+            echo    '<tr>
+                        <td>'.$enq->name_prefix.'-'.$enq->name.' '.$enq->lastname.'</td>
+                        <td>'.$enq->phone.'</td>
+                        <td><a href="'.base_url($url).'" class="btn" target="_blank" data-animation="effect-scale">Go To Profile</a></td>
+                    </tr>';
+            echo '</table>';
+
+        }else if((empty($res->enq_id)) && (!empty($res->phone_number))){
+            $this->db->set('status','0');
+            $this->db->where('uid',base64_decode($uid));
+            $this->db->update('tbl_col_log');
+
+           echo '<table class="table table-bordered table-hover">
+                        <tr>
+                            <th>Response</th>
+                            <th>Mobile</th>
+                            <th>Action</th>
+                        </tr>';                  
+            echo    '<tr>
+                        <td>New mobile number</td>
+                        <td>'.$res->phone_number.'</td>
+                        <td><a href="'.base_url('enquiry/create/').base64_encode($res->phone_number).'" class="btn" target="_blank" data-animation="effect-scale">Create Lead</a></td>
+                    </tr>';
+            echo '</table>'; 
+
+
+        }else{
+            echo '0';
+        }
+    }
+    
+    
+      public function click_to_dial($phone='',$integration_type=''){        
+        $phone           = '+91'.$phone;        
+        $support_user_id = $this->session->telephony_agent_id;
+            if(user_access(790)){
+                $curl = curl_init();
+                curl_setopt_array($curl, array(
+                  CURLOPT_URL => 'https://kpi.knowlarity.com/Basic/v1/account/call/makecall',
+                  CURLOPT_RETURNTRANSFER => true,
+                  CURLOPT_ENCODING => '',
+                  CURLOPT_MAXREDIRS => 10,
+                  CURLOPT_TIMEOUT => 0,
+                  CURLOPT_FOLLOWLOCATION => true,
+                  CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+                  CURLOPT_CUSTOMREQUEST => 'POST',
+                  CURLOPT_POSTFIELDS =>'{
+                    "k_number": "+918792740105",
+                    "agent_number": "'.$support_user_id.'",
+                    "customer_number": "'.$phone.'",
+                    "caller_id": "+918035391158"
+                }',
+                  CURLOPT_HTTPHEADER => array(
+                    'Authorization: a191fd41-29e3-4a00-b101-5a0c1b042221',
+                    'x-api-key: lF4vZUSwA8Jab0ABWsITtxwM1ZwL6h2jZDdCTX30',
+                    'Content-Type: application/json'
+                  ),
+                ));        
+                $response = curl_exec($curl);         
+                curl_close($curl);
+                echo $response;
+        }else if(user_access(791)) {
+            $this->load->model('telephony_model');
+            $this->telephony_model->click_to_dial_($phone);
+        }else if(user_access(792)){
+            $this->load->model('telephony_model');
+            $this->click_to_dial_cloud_connect($phone);
+        }else if(user_access(793)){
+            $this->load->model('telephony_model');
+            $this->click_to_dial_cloud_connect2($phone);
+        }else if(user_access(795)){
+            $this->load->model('telephony_model');
+            $this->click_to_dial_tatatele($phone);
+        }else if(user_access(796)){
+            $this->load->model('telephony_model');
+            $this->ameyo_api($phone);
+        } else if(user_access(794)){
+            $this->load->model('telephony_model');
+            $this->sansoftware_dail($phone);
+        }
+		else if(user_access(797)){
+            $this->load->model('telephony_model');
+            $this->cntrix_dail($phone);
+        }
+    }
+	public function sansoftware_dail($phone='',$enq=''){
+		$curl = curl_init();
+		curl_setopt_array($curl, array(
+		  CURLOPT_URL => "https://up-ccc.co/pbxadmin/sanpbxapi",
+		  CURLOPT_RETURNTRANSFER => true,
+		  CURLOPT_ENCODING => "",
+		  CURLOPT_MAXREDIRS => 10,
+		  CURLOPT_TIMEOUT => 30,
+		  CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+		  CURLOPT_CUSTOMREQUEST => "POST",
+		  CURLOPT_POSTFIELDS =>'{"action":"dial","number":"'.$phone.'","exten":"'.$this->session->extension_number.'"}',
+		  CURLOPT_HTTPHEADER => array(
+	   "authorization: Basic ".$this->session->auth,
+       "cache-control: no-cache",
+       "content-type: application/json",
+       "postman-token: ddba2191-362b-5b17-62a3-d31050499c34"
+		  ),
+		));
+	   echo   $response = curl_exec($curl);
+    }
+
+     public function click_to_dial_($phone=''){
+        $url = "http://up-ccc.co/dial.php?command=dial&ext=XXXX&number=XXXXXXXXXX";
+        $data = array(
+        'token'=>$this->session->telephony_token,
+        'customer_number'=>$phone,
+        'customer_cc'=>91,
+        'support_user_id'=>$this->session->telephony_agent_id
+        );
+        $curl = curl_init();
+        curl_setopt( $curl, CURLOPT_URL, $url);
+        curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
+        curl_setopt($curl, CURLOPT_HTTPHEADER, array('application/x-www-form-urlencoded'));
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        $response = curl_exec( $curl );
+        curl_close( $curl );
+        print_r($response);
+    }
+
+    function click_to_dial_tatatele($phone='',$api='')
+    {
+    $phone = $phone;
+    $telephony_type = $api;
+    $this->db->where('phone',$phone);
+    $res=$this->db->get('enquiry')->row();
+    if(!empty($telephony_type)){    
+    $curl = curl_init();
+    curl_setopt_array($curl, array(  CURLOPT_URL => "https://api-cloudphone.tatateleservices.com/v1/click_to_call_support",
+    CURLOPT_RETURNTRANSFER => true,  CURLOPT_CUSTOMREQUEST => "POST", 
+    CURLOPT_POSTFIELDS =>'{
+    "customer_number": "'.$phone.'",  
+    "api_key": "'.$telephony_type.'"}', 
+    CURLOPT_HTTPHEADER => array("content-type:application/json", 
+    "accept: application/json"  ),));
+    $response = curl_exec($curl);
+    echo json_encode(array('enq'=>$res->enquiry_id,'type'=>$res->status));
+     }else{
+     
+        }
+    }
+
+   	function click_to_dial_cloud_connect2($phone){
+	   $curl = curl_init();
+		curl_setopt_array($curl, array(
+		  CURLOPT_URL => "https://crm2.cloud-connect.in/ccpl_api/v1.4/api/info/click2call",
+		  CURLOPT_RETURNTRANSFER => true,
+		  CURLOPT_ENCODING => "",
+		  CURLOPT_MAXREDIRS => 10,
+		  CURLOPT_TIMEOUT => 30,
+		  CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+		  CURLOPT_CUSTOMREQUEST => "POST",
+		  CURLOPT_POSTFIELDS => "{\n           \"token_id\" :\"Uz958kchnsSlfse9\",\n\t\t\t\"phone_number\" :\"$phone\",\n\t\t\t\"extension_number\" :\"501\",\n\t\t\t\"extension_password\" :\"2d4196097f0823981d7efc9b99b7c1eb\"\n        }",
+		  CURLOPT_HTTPHEADER => array(
+			"cache-control: no-cache",
+			"content-type: application/json",
+			"postman-token: e69bb196-3695-7590-c8df-2db58ef60749"
+		  ),
+		));
+
+		$response = curl_exec($curl);
+		$err = curl_error($curl);
+
+		curl_close($curl);
+
+		if ($err) {
+		  echo "cURL Error #:" . $err;
+		} else {
+		  echo $response;
+		}
+       }
+   
+   function click_to_dial_cloud_connect($phone){
+	   $curl = curl_init();
+		curl_setopt_array($curl, array(
+		  CURLOPT_URL => "https://crm2.cloud-connect.in/ccpl_api/v1.4/api/info/click2call",
+		  CURLOPT_RETURNTRANSFER => true,
+		  CURLOPT_ENCODING => "",
+		  CURLOPT_MAXREDIRS => 10,
+		  CURLOPT_TIMEOUT => 30,
+		  CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+		  CURLOPT_CUSTOMREQUEST => "POST",
+		  CURLOPT_POSTFIELDS => "{\n           \"token_id\" :\"Uz958kchnsSlfse9\",\n\t\t\t\"phone_number\" :\"$phone\",\n\t\t\t\"extension_number\" :\"503\",\n\t\t\t\"extension_password\" :\"2d4196097f0823981d7efc9b99b7c1eb\"\n        }",
+		  CURLOPT_HTTPHEADER => array(
+			"cache-control: no-cache",
+			"content-type: application/json",
+			"postman-token: e69bb196-3695-7590-c8df-2db58ef60749"
+		  ),
+		));
+
+		$response = curl_exec($curl);
+		$err = curl_error($curl);
+
+		curl_close($curl);
+
+		if ($err) {
+		  echo "cURL Error #:" . $err;
+		} else {
+		  echo $response;
+		}
+       }
+   
+    public function ameyo_api(){
+        $curl = curl_init();
+        
+        $user_id = $this->session->email;        
+        $campaign_id = $this->input->post('campaignId');
+        $phone = $this->input->post('phone');
+        
+        curl_setopt_array($curl, array(
+          CURLOPT_URL => "https://app.ameyoemerge.in:8887/ameyowebaccess/command/?command=clickToDialWithToken",
+          CURLOPT_RETURNTRANSFER => true,
+          CURLOPT_ENCODING => "",
+          CURLOPT_MAXREDIRS => 10,
+          CURLOPT_TIMEOUT => 0,
+          CURLOPT_FOLLOWLOCATION => true,
+          CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+          CURLOPT_CUSTOMREQUEST => "POST",
+          CURLOPT_POSTFIELDS => "data=%7B%22userId%22%3A%22".$user_id."%22%2C%22campaignId%22%3A%22".$campaign_id."%22%2C%22phone%22%3A%22".$phone."%22%2C%22shouldAddCustomer%22%3Afalse%7D",
+          CURLOPT_HTTPHEADER => array(
+            "hash-key: e1b672e444bc90e3ef6b7ea9d7c9eb7d",
+            "policy-name: token-based-authorization-policy",
+            "requesting-host: religare-clickToDialWithToken",
+            "Content-Type: application/x-www-form-urlencoded",
+            "Cookie: JSESSIONID=CD6B2C8814410AC04966D61D885E4B61; __METADATA__=a16e9790-cd73-42b8-863e-77764c6b33e1"
+          ),
+        ));
+
+        $response = curl_exec($curl);
+
+        curl_close($curl);
+        echo $response;
+
+    }
+
+}
